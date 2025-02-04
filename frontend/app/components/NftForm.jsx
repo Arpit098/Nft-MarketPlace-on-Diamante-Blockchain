@@ -63,98 +63,86 @@ const NftForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if(!window.diam || !publicKey) window.diam.connect()
+      if(!window.diam || !publicKey) {
+        await window.diam.connect();
+      }
       const assetName = nftName;
       const filePath = link; 
     
-
       const server = new Aurora.Server("https://diamtestnet.diamcircle.io/");
       console.log("Aurora server initialized");
 
-      
-      console.log("Creating issuer keypair...");
-      const issuerSecret = "SB7KNGUG3ZJA57LASL75JJ4QTCKMADLQY52HIFUO3I324PNIKEEUTVH3";
-      const issuerKeypair = Keypair.fromSecret(issuerSecret);
-      const issuerAccount = await server.loadAccount(issuerKeypair.publicKey());
+      const userAccount = await server.loadAccount(publicKey);
+      console.log("User account loaded:", publicKey);
 
-      const asset = new Asset(assetName, issuerKeypair.publicKey());
-      const setFlagsTx = new TransactionBuilder(issuerAccount, {
+      console.log("Creating random issuer keypair...");
+      const issuerKeypair = Keypair.random();
+      console.log("Issuer public key:", issuerKeypair.publicKey());
+
+      const combinedTx = new TransactionBuilder(userAccount, {
         fee: BASE_FEE,
         networkPassphrase: Networks.TESTNET,
       })
       .addOperation(
-          Operation.setOptions({
-              setFlags: 10, 
-          })
+        Operation.createAccount({
+          destination: issuerKeypair.publicKey(),
+          startingBalance: "2",
+        })
       )
-      .setTimeout(100)
+      .addOperation(
+        Operation.setOptions({
+          source: issuerKeypair.publicKey(),
+          setFlags: 10,
+        })
+      )
+      .addOperation(
+        Operation.changeTrust({ 
+          asset: new Asset(assetName, issuerKeypair.publicKey()),
+          source: publicKey
+        })
+      )
+      .addOperation(
+        Operation.payment({
+          source: issuerKeypair.publicKey(),
+          destination: publicKey,
+          asset: new Asset(assetName, issuerKeypair.publicKey()),
+          amount: amount,
+        })
+      )
+      .addOperation(
+        Operation.setOptions({
+          source: issuerKeypair.publicKey(),
+          masterWeight: 0,
+        })
+      )
+      .setTimeout(180)
       .build();
-  
-      setFlagsTx.sign(issuerKeypair);
-      await server.submitTransaction(setFlagsTx);
-      console.log("Issuer account flags set successfully");
 
-      const receiverAccount = await server.loadAccount(publicKey);
-      console.log("reciever account:", receiverAccount);
-      const changeTrustTx = new TransactionBuilder(receiverAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(
-          Operation.changeTrust({ 
-            asset: asset,
-            limit: "100",
-          })
-        )
-        .setTimeout(100)
-        .build();
-      console.log("signing transaction:")
+      combinedTx.sign(issuerKeypair);
 
-     try {
-       if (!window.diam) {
-         await window.diam.connect();
-       }
-       
-       const signedTransaction = await window.diam.sign(
-         changeTrustTx.toXDR(),
-         false,
-         "Diamante Testnet 2024"
-       );
-       
-       if (!signedTransaction || !signedTransaction.message) {
-         throw new Error("Failed to sign transaction with DIAM wallet");
-       }
-     
-       const signedTx = TransactionBuilder.fromXDR(
-         signedTransaction.message.data,
-         Networks.TESTNET
-       );
-       
-       const changeTrustResult = await server.submitTransaction(signedTx);
-       console.log("Trust line created successfully");
-     
-     } catch (error) {
-       console.error("Wallet signing error:", error);
-       throw error;
-     }
-      const paymentTx = new TransactionBuilder(issuerAccount, {
-        fee: BASE_FEE,
-        networkPassphrase: Networks.TESTNET,
-      })
-        .addOperation(
-          Operation.payment({
-            destination: publicKey,
-            asset: new Asset(assetName, issuerKeypair.publicKey()),
-            amount: amount,
-          })
-        )
-        .setTimeout(100)
-        .build();
+      console.log("Requesting wallet signature...");
+      const signedTransaction = await window.diam.sign(
+        combinedTx.toXDR(),
+        false,
+        "Diamante Testnet 2024"
+      );
 
-      paymentTx.sign(issuerKeypair);
-      const paymentResult = await server.submitTransaction(paymentTx);
-      console.log("NFT Payment transaction hash:", paymentResult.hash);
+      if (!signedTransaction || !signedTransaction.message) {
+        throw new Error("Failed to sign transaction with DIAM wallet");
+      }
+
+      const signedTx = TransactionBuilder.fromXDR(
+        signedTransaction.message.data,
+        Networks.TESTNET
+      );
       
+      // Submit the combined transaction
+      console.log("Submitting combined transaction...");
+      const result = await server.submitTransaction(signedTx);
+      console.log("Combined transaction successful:", result.hash);
+      
+      // Save NFT metadata
+      console.log("Saving NFT metadata...");
       const saveNFTResponse = await fetch("http://localhost:8000/nft/saveNft", {
         method: "POST",
         headers: {
@@ -164,7 +152,8 @@ const NftForm = () => {
             name: assetName,
             description: description,
             imgUrl: filePath,
-            quantity: amount, 
+            quantity: amount,
+            issuerPublicKey: issuerKeypair.publicKey(),
         }),
       });
   
@@ -172,16 +161,14 @@ const NftForm = () => {
   
       if (!saveNFTResponse.ok) {
           console.error("Failed to save NFT:", saveNFTData.message);
-      } else {
-          console.log("NFT saved successfully:", saveNFTData);
+          throw new Error(saveNFTData.message);
       }
+      console.log("NFT saved successfully:", saveNFTData);
       
       return {
-        message: "Asset creation prepared successfully",
-        // cid: ipfsCID,
-        transactionHash: paymentResult.hash,
+        message: "Asset created successfully",
+        transactionHash: result.hash,
         issuerPublicKey: issuerKeypair.publicKey(),
-        issuerSecretKey: issuerKeypair.secret(),
         assetName: assetName,
       };
     } catch (error) {

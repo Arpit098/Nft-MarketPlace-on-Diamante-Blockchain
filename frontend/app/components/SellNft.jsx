@@ -21,12 +21,10 @@ const SellNft = () => {
     const [amount, setAmount] = useState("");
     const [price, setPrice] = useState("");
   
-    // Helper function to validate and format amount
     const handleSubmit = async (e) => {
         e.preventDefault();
         
         try {
-            // 1. Check and establish DIAM connection
             if (!window.diam) {
                 console.log("DIAM wallet not detected, attempting to connect...");
                 try {
@@ -40,8 +38,6 @@ const SellNft = () => {
             if (!publicKey) {
                 throw new Error("Public key not available. Please connect wallet first.");
             }
-    
-            // 2. Server setup and account loading
             console.log("Loading account from Diamante testnet...");
             const server = new Aurora.Server("https://diamtestnet.diamcircle.io/");
             let account;
@@ -53,7 +49,6 @@ const SellNft = () => {
                 throw new Error("Failed to load account. Please check your connection and account status.");
             }
     
-            // 3. NFT balance verification
             const nftAsset = account.balances.find(
                 balance => balance.asset_code === nftName && balance.asset_type !== 'native'
             );
@@ -71,7 +66,6 @@ const SellNft = () => {
              .selling(sellingAsset)
              .forAccount(publicKey)
              .call();
-            // 4. Transaction building
             console.log("Building transaction...");
             
     
@@ -82,14 +76,13 @@ const SellNft = () => {
             .addOperation(Operation.manageSellOffer({
                 selling: sellingAsset,
                 buying: buyingAsset,
-                amount: amount.toString(), // Ensure amount is string
-                price: price.toString(),    // Ensure price is string
+                amount: amount.toString(), 
+                price: price.toString(), 
                 offerId: 0
             }))
             .setTimeout(100)
             .build();
     
-            // 5. Transaction signing
             console.log("Requesting signature from DIAM wallet...");
             const signedTx = await window.diam.sign(
                 tx.toXDR(),
@@ -101,8 +94,6 @@ const SellNft = () => {
                 console.error("Signing response:", signedTx);
                 throw new Error("Transaction signing failed - no signature data received");
             }
-    
-            // 6. Transaction submission
             console.log("Converting signed transaction from XDR...");
             const signedTransaction = TransactionBuilder.fromXDR(
                 signedTx.message.data,
@@ -114,7 +105,6 @@ const SellNft = () => {
             console.log("Transaction successful! Hash:", result.hash);
             await new Promise(resolve => setTimeout(resolve, 5000));
 
-            // Fetch new offers with retry mechanism
             let attempts = 0;
             let newOffer = null;
             while (attempts < 3 && !newOffer) {
@@ -127,7 +117,6 @@ const SellNft = () => {
 
                 console.log("New offers count:", newOffers.records.length);
 
-                // Look for the new offer by comparing amounts and prices
                 newOffer = newOffers.records.find(offer => {
                     const isNew = !existingOffers.records.some(existing => existing.id === offer.id);
                     const matchesAmount = parseFloat(offer.amount) === parseFloat(amount);
@@ -156,17 +145,16 @@ const SellNft = () => {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    offerId: Number(newOffer.id), // Convert to string to match API expectations
+                    offerId: Number(newOffer.id),
                     name: nftName,
-                    price: Number(price), // Ensure price is a number
-                    quantity: Number(amount), // Ensure quantity is a number
+                    price: Number(price),
+                    quantity: Number(amount),
                     seller: publicKey
                 })
             });
             
-            const data = await response.json(); // assuming your server returns JSON
-            console.log(data); // check the response
-            // Clear form
+            const data = await response.json(); 
+            console.log(data); 
             setNftName("");
             setAmount("");
             setPrice("");
@@ -177,7 +165,6 @@ const SellNft = () => {
         } catch (error) {
             console.error("Detailed error:", error);
             
-            // Provide user-friendly error messages
             let userMessage = "Failed to create sell offer: ";
             if (error.response?.data?.extras?.result_codes) {
                 userMessage += `${error.response.data.extras.result_codes.operations.join(", ")}`;
